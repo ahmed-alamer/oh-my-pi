@@ -1752,6 +1752,7 @@ describe("LiteLLM declared model capabilities", () => {
 		const spec = await discover(richFetch({ ...limits, supported_openai_params: ["tools"] }, limits, reference));
 
 		expect(effortOf(spec)).toBe(false);
+		expect((spec?.compat as { omitReasoningEffort?: boolean } | undefined)?.omitReasoningEffort).toBe(true);
 	});
 
 	test("takes the reported params list's verdict when a later endpoint reports one", async () => {
@@ -1776,5 +1777,33 @@ describe("LiteLLM declared model capabilities", () => {
 		);
 
 		expect(effortOf(spec)).toBe(true);
+		expect((spec?.compat as { omitReasoningEffort?: boolean } | undefined)?.omitReasoningEffort).toBe(false);
+	});
+
+	test("clamps bogus max_output_tokens equal to 1M contextWindow to reference maxTokens or 65536", async () => {
+		const spec = await fetchLiteLLMRichModels({
+			api: "openai-completions",
+			provider: "litellm",
+			baseUrl: "http://primary:4000/v1",
+			fetch: vi.fn(async (input: string | URL | Request) => {
+				const url = inputUrl(input);
+				if (url.endsWith("/model_group/info")) {
+					return Response.json({
+						data: [
+							{
+								model_group: "gemini-4-argon",
+								max_input_tokens: 1_048_576,
+								max_output_tokens: 1_048_576,
+								supports_vision: true,
+								supports_reasoning: true,
+							},
+						],
+					});
+				}
+				return new Response("{}", { status: 404 });
+			}) as FetchImpl,
+		});
+		expect(spec?.[0]?.contextWindow).toBe(1_048_576);
+		expect(spec?.[0]?.maxTokens).toBe(65_536);
 	});
 });

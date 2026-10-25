@@ -601,26 +601,30 @@ export function pruneToolOutputs(
 		const tokens = tokenizer.countMessage(message as AgentMessage);
 		messageSuffix += tokens;
 
-		// Prompt-cache guard: a result whose all-message suffix exceeds the
-		// warm-cache window sits in the already-sent cached prefix — mutating it
-		// re-writes the whole suffix (cacheWrite premium), or the whole
-		// conversation once the next request's cache lookup is out of reach.
-		// Both only worsen walking back, so every older result is in the warm
-		// prefix too. Deeper, still-cached superseded/useless copies are left for
-		// compaction/shake.
-		if (cacheWarmSuffixTokens !== undefined && (suffixAfter > cacheWarmSuffixTokens || i < lookbackFloor)) break;
-
 		if (message.prunedAt !== undefined) {
 			accumulatedTokens += tokens;
 			continue;
 		}
 
+		// Prompt-cache guard: a result whose all-message suffix exceeds the
+		// warm-cache window sits in the already-sent cached prefix — mutating it
+		// re-writes the whole suffix (cacheWrite premium), or the whole
+		// conversation once the next request's cache lookup is out of reach.
+		// Superseded and useless results bypass `protectTokens`, so they are
+		// restricted to the cache-warm tail; age-based victims outside
+		// `protectTokens` still prune so `protectTokens: 40_000` is not dead code
+		// when `cacheWarmSuffixTokens: 8_000` is set, unless prefix-bound
+		// thinking (`cacheWarmSuffixTokens === 0`) or `cacheLookbackPositions`
+		// forbids rewriting the prefix.
+		const outsideWarmTail =
+			cacheWarmSuffixTokens !== undefined && (suffixAfter > cacheWarmSuffixTokens || i < lookbackFloor);
+		if (outsideWarmTail && (cacheWarmSuffixTokens === 0 || i < lookbackFloor)) break;
+
 		// Superseded and useless results bypass the age-based protect window
 		// (a stale re-read copy, or a result the tool flagged as uninformative,
-		// is dead weight at any age) — but only within the cache-warm tail: the
-		// guard above already excluded deeper, still-cached copies.
-		const superseded = supersededMessages?.has(message) ?? false;
-		const useless = uselessMessages?.has(message) ?? false;
+		// is dead weight at any age) — but only within the cache-warm tail.
+		const superseded = !outsideWarmTail && (supersededMessages?.has(message) ?? false);
+		const useless = !outsideWarmTail && (uselessMessages?.has(message) ?? false);
 		const tooSmall = tokens < MIN_PRUNE_TOKENS;
 		if (
 			!superseded &&

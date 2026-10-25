@@ -193,6 +193,49 @@ describe("terminal frame without connection close", () => {
 		expect(result.content).toEqual([{ type: "text", text: "Hello" }]);
 	}, 10_000);
 
+	it("openai-completions: resets open partial text when a proxy restarts the stream with a new chunk.id before finish_reason", async () => {
+		const fetchMock = createNeverClosingFetch([
+			{
+				id: "chatcmpl-attempt-1",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [{ index: 0, delta: { role: "assistant", content: "First truncated attempt..." } }],
+			},
+			{
+				id: "chatcmpl-attempt-2",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [{ index: 0, delta: { role: "assistant", content: "Clean restarted answer." } }],
+			},
+			{
+				id: "chatcmpl-attempt-2",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+			},
+			{
+				id: "chatcmpl-attempt-2",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [],
+				usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+			},
+		]);
+
+		const result = await streamOpenAICompletions(completionsModel, baseContext(), {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(result.responseId).toBe("chatcmpl-attempt-2");
+		expect(result.content).toEqual([{ type: "text", text: "Clean restarted answer." }]);
+	}, 10_000);
+
 	it("openai-responses: breaks immediately on response.completed", async () => {
 		const fetchMock = createNeverClosingFetch([
 			{ type: "response.created", response: { id: "resp_terminal" } },

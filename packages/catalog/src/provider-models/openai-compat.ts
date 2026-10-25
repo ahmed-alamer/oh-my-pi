@@ -5913,10 +5913,13 @@ function mapLiteLLMRichEntry<TApi extends Api>(
 		getLiteLLMMetadataValue(entry, "max_input_tokens"),
 		reference?.contextWindow ?? OPENAI_COMPAT_DISCOVERY_DEFAULT_CONTEXT_WINDOW,
 	);
-	const maxTokens = toPositiveNumber(
-		getLiteLLMMetadataValue(entry, "max_output_tokens"),
-		reference?.maxTokens ?? Math.min(contextWindow, OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS),
-	);
+	const reportedMaxOutputTokens = toPositiveNumber(getLiteLLMMetadataValue(entry, "max_output_tokens"), null);
+	const maxTokens =
+		reportedMaxOutputTokens !== null
+			? reportedMaxOutputTokens >= contextWindow && contextWindow > 65_536
+				? (reference?.maxTokens ?? Math.min(contextWindow, 65_536))
+				: reportedMaxOutputTokens
+			: (reference?.maxTokens ?? Math.min(contextWindow, OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS));
 	const supportsVision = getLiteLLMMetadataValue(entry, "supports_vision");
 	const supportsReasoning = getLiteLLMMetadataValue(entry, "supports_reasoning");
 	const supportedOpenAIParams = getSupportedOpenAIParams(entry);
@@ -5947,15 +5950,19 @@ function mapLiteLLMRichEntry<TApi extends Api>(
 		supportsStore: false,
 		supportsDeveloperRole: false,
 		...(supportedOpenAIParams !== undefined
-			? { supportsReasoningEffort: supportedOpenAIParams.includes("reasoning_effort") }
-			: referenceCompat?.supportsReasoningEffort !== undefined
-				? { supportsReasoningEffort: referenceCompat.supportsReasoningEffort }
-				: {}),
+			? {
+					supportsReasoningEffort: supportedOpenAIParams.includes("reasoning_effort"),
+					omitReasoningEffort: !supportedOpenAIParams.includes("reasoning_effort"),
+				}
+			: {
+					...(referenceCompat?.supportsReasoningEffort !== undefined
+						? { supportsReasoningEffort: referenceCompat.supportsReasoningEffort }
+						: {}),
+					...(referenceCompat?.omitReasoningEffort !== undefined
+						? { omitReasoningEffort: referenceCompat.omitReasoningEffort }
+						: {}),
+				}),
 		...(referenceCompat?.reasoningEffortMap ? { reasoningEffortMap: referenceCompat.reasoningEffortMap } : {}),
-		...(referenceCompat?.omitReasoningEffort !== undefined
-			? { omitReasoningEffort: referenceCompat.omitReasoningEffort }
-			: {}),
-		// The deployment is authoritative about its own groups. When its
 		// `model_info.supports_vision` says the group reads images, the derived
 		// opt-out has to outrank the class-wide text-only guard
 		// (`classes/deepseek.kdl`), which keys on the model id alone and would
@@ -6024,6 +6031,9 @@ function mergeLiteLLMCompat<TApi extends Api>(
 		const reported = (existing as Record<string, unknown>).supportsReasoningEffort;
 		if (reported === undefined) delete merged.supportsReasoningEffort;
 		else merged.supportsReasoningEffort = reported;
+		const reportedOmit = (existing as Record<string, unknown>).omitReasoningEffort;
+		if (reportedOmit === undefined) delete merged.omitReasoningEffort;
+		else merged.omitReasoningEffort = reportedOmit;
 	}
 	return merged as unknown as ModelSpec<TApi>["compat"];
 }
@@ -6262,6 +6272,7 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("litellm")!;
 	return {
 		providerId: "litellm",
+		// rich-v13 invalidates stale reference omitReasoningEffort & un-clamped max_output_tokens.
 		// rich-v12 invalidates namespaced proxy ids that missed bare catalog
 		// references. rich-v11 excluded ClinePass gateway metadata (issue #10932).
 		// rich-v10 filtered known non-conversational LiteLLM modes, keyed the

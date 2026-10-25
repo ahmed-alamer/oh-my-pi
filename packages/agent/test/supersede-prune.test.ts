@@ -818,6 +818,24 @@ describe("cache-stable boundary — warm prefix protection", () => {
 		expect(resultMessage(result1).prunedAt).toBeUndefined();
 		expect(resultMessage(result2).prunedAt).toBeDefined(); // at/after boundary, in tail -> pruned
 	});
+
+	test("(d) age-based tool outputs outside protectTokens still prune when cacheWarmSuffixTokens is set", () => {
+		const [call1, oldBigResult] = readPair("src/old.ts", BIG_TEXT, T0);
+		const [call2, recentBigResult] = readPair("src/new.ts", BIG_TEXT, T0 + 1_000);
+		const entries: SessionEntry[] = [call1, oldBigResult, call2, recentBigResult];
+		const recentTokens = tokenizer.countMessage(resultMessage(recentBigResult));
+
+		const result = pruneToolOutputs(entries, tokenizer, {
+			protectTokens: recentTokens,
+			minimumSavings: 0,
+			protectedTools: [],
+			cacheWarmSuffixTokens: 50,
+		});
+
+		expect(result.prunedCount).toBe(1);
+		expect(resultMessage(oldBigResult).prunedAt).toBeDefined();
+		expect(resultMessage(recentBigResult).prunedAt).toBeUndefined();
+	});
 });
 
 /** `count` small, unkeyed bash call/result pairs: many content blocks, few tokens. */
