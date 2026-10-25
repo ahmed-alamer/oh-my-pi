@@ -2749,9 +2749,30 @@ export class SessionMaintenance {
 		// will actually rewrite history; awaiting it on every ordinary tool turn lets
 		// a slow message_end listener leave the TUI "generating" with no provider
 		// request or tool running.
-		const billedContextTokens = calculateContextTokens(lastAssistant.usage);
-		const storedContextTokens = this.#estimateStoredContextTokens();
-		const contextTokens = compactionContextTokens(billedContextTokens, storedContextTokens);
+		let billedContextTokens = calculateContextTokens(lastAssistant.usage);
+		let storedContextTokens = this.#estimateStoredContextTokens();
+		let contextTokens = compactionContextTokens(billedContextTokens, storedContextTokens);
+		const midTurnPrunePayloadTokens = 150_000;
+		if (
+			!this.#usesExperimentalContextManagement() &&
+			(contextTokens >= midTurnPrunePayloadTokens || shouldCompact(contextTokens, contextWindow, compactionSettings))
+		) {
+			if (!(await this.#host.persistTurnMessagesForMidRunCompaction(context))) return;
+			if (signal?.aborted || this.#host.isDisposed()) return;
+			const supersedeResult = await this.#pruneStaleToolResults();
+			const pruneResult = await this.#pruneToolOutputs();
+			const maintenanceTokensFreed = (supersedeResult?.tokensSaved ?? 0) + (pruneResult?.tokensSaved ?? 0);
+			if (maintenanceTokensFreed > 0) {
+				const prunedMessages = this.#host.agent.state.messages;
+				if (prunedMessages !== activeMessages) {
+					activeMessages.splice(0, activeMessages.length, ...prunedMessages);
+					invalidateConvertToLlmArrayCache(activeMessages);
+				}
+				billedContextTokens = Math.max(0, billedContextTokens - maintenanceTokensFreed);
+				storedContextTokens = this.#estimateStoredContextTokens();
+				contextTokens = compactionContextTokens(billedContextTokens, storedContextTokens);
+			}
+		}
 		if (!shouldCompact(contextTokens, contextWindow, compactionSettings)) {
 			this.maybeStartSpeculativeCompaction(contextTokens, contextWindow);
 			return;

@@ -1261,7 +1261,7 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			}
 		});
 
-		it("resumes a Factory Droid Gemini text stream that ends without a finish reason", async () => {
+		it("replays a Factory Droid Gemini text stream that ends without a finish reason instead of injecting a prefill continuation", async () => {
 			const truncated = JSON.stringify({
 				candidates: [{ content: { role: "model", parts: [{ text: "Here is the first half" }] } }],
 			});
@@ -1275,8 +1275,11 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 				},
 			).result();
 			const { host, continues } = continuationHost(message);
-			expect(new TurnRecovery(host).handleCommittedTextStreamStall(message)).toBe(true);
-			expect(continues).toEqual(["stream-stall-continue"]);
+			host.model = () => factoryGemini();
+			const recovery = new TurnRecovery(host);
+			expect(recovery.handleCommittedTextStreamStall(message)).toBe(false);
+			expect(recovery.isRetryableError(message)).toBe(true);
+			expect(continues).toEqual([]);
 		});
 
 		it("stops continuing past the per-prompt cap and resets on a new prompt", () => {

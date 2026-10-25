@@ -702,7 +702,19 @@ export class TurnRecovery {
 			if (block.type === "text" && hasNonWhitespace(block.text)) hasText = true;
 		}
 		if (!hasText) return false;
-
+		// Gemini and OpenAI Chat Completions do not support assistant-role prefill
+		// continuation: keeping the half-finished assistant turn and appending a
+		// developer/user "Continue where it stopped" message causes the model to
+		// restart and repeat its answer from the beginning. Leave those models to
+		// the standard retry/error path instead of injecting a continuation prompt.
+		const activeModel = this.#host.model();
+		if (
+			activeModel?.identity?.class === "gemini" ||
+			activeModel?.api === "openai-completions" ||
+			message.api === "openai-completions"
+		) {
+			return false;
+		}
 		this.#streamStallContinueCount++;
 		if (this.#streamStallContinueCount > STREAM_STALL_CONTINUE_MAX_RETRIES) {
 			logger.warn("Stream kept stalling after committed text past retry cap", {
@@ -1546,7 +1558,19 @@ export class TurnRecovery {
 				AIError.is(id, AIError.Flag.MalformedFunctionCall) ||
 				AIError.retriable(id)) &&
 			this.#unexecutedToolCallsReplaySafe(message);
-		if (this.#hasReplayUnsafeOutput(message) && !replaySafeUnexecutedTools) return false;
+		const activeModelForReplay = this.#host.model();
+		const replaySafeCommittedTextStall =
+			(activeModelForReplay?.identity?.class === "gemini" ||
+				activeModelForReplay?.api === "openai-completions" ||
+				message.api === "openai-completions") &&
+			(this.#isMidStreamTransportFailure(message, id) ||
+				(!this.#host.streamingEditAbortTriggered() &&
+					isUnexpectedSocketCloseMessage(message.errorMessage ?? ""))) &&
+			!message.content.some(
+				block => block.type === "toolCall" || block.type === "image" || block.type === "anthropicServerTool",
+			);
+		if (this.#hasReplayUnsafeOutput(message) && !replaySafeUnexecutedTools && !replaySafeCommittedTextStall)
+			return false;
 		if (AIError.is(id, AIError.Flag.AccountPolicy) || this.isClassifierRefusal(message)) return true;
 		return AIError.retriable(id);
 	}

@@ -1056,6 +1056,7 @@ const streamOpenAICompletionsOnce = (
 				}
 			};
 			let currentBlock: OpenAIStreamBlock | undefined;
+			let activeChunkId: string | undefined;
 			let messageThoughtSignature: GeminiMessageThoughtSignature | undefined;
 			// Content blocks are append-only for the lifetime of the stream, so each
 			// block's index is stable once pushed. Map block → index to keep the
@@ -1381,9 +1382,33 @@ const streamOpenAICompletionsOnce = (
 				if (streamError) throw streamError;
 
 				// OpenAI documents ChatCompletionChunk.id as the unique chat completion identifier,
-				// and each chunk in a streamed completion carries the same id.
-				output.responseId ||= chunk.id;
-
+				// and each chunk in a streamed completion carries the same id. If a proxy
+				// (e.g. LiteLLM) restarts the upstream stream on the same SSE connection
+				// with a new non-empty `chunk.id` before `finish_reason` and before any
+				// tool call completed, reset the open partial text/thinking accumulator
+				// instead of concatenating the fresh attempt onto the truncated first attempt.
+				const incomingChunkId =
+					typeof chunk.id === "string" && chunk.id.length > 0 && chunk.id !== "0" ? chunk.id : undefined;
+				if (
+					incomingChunkId &&
+					activeChunkId &&
+					incomingChunkId !== activeChunkId &&
+					streamFinishedAt === undefined &&
+					output.content.length > 0 &&
+					!output.content.some(block => block.type === "toolCall")
+				) {
+					output.content.length = 0;
+					contentIndexByBlock.clear();
+					currentBlock = undefined;
+					liteLLMThinkingBlock = undefined;
+					lastCumulativeReasoningBySignature.clear();
+					deepseekStripBuffer = "";
+					stream.push({ type: "start", partial: output });
+				}
+				if (incomingChunkId) {
+					activeChunkId = incomingChunkId;
+				}
+				output.responseId = incomingChunkId ?? output.responseId ?? chunk.id;
 				// Aggregators (OpenRouter, Vercel AI Gateway, …) report the upstream
 				// provider that actually served the request via a top-level `provider`
 				// field present on every chunk. Capture the first non-empty value so
