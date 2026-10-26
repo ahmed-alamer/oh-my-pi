@@ -1384,15 +1384,44 @@ const streamOpenAICompletionsOnce = (
 				// OpenAI documents ChatCompletionChunk.id as the unique chat completion identifier,
 				// and each chunk in a streamed completion carries the same id. If a proxy
 				// (e.g. LiteLLM) restarts the upstream stream on the same SSE connection
-				// with a new non-empty `chunk.id` before `finish_reason` and before any
-				// tool call completed, reset the open partial text/thinking accumulator
-				// instead of concatenating the fresh attempt onto the truncated first attempt.
+				// before `finish_reason` and before any tool call completed — signaled by:
+				//   1. a new non-empty `chunk.id`,
+				//   2. a new `delta.role === "assistant"` frame after visible text or
+				//      sealed thinking has already streamed, or
+				//   3. a fresh `thinking_blocks` text chunk after visible text has already
+				//      streamed following a sealed `thinking_blocks` signature (Vertex/Gemini
+				//      only emits its single thought block before the answer text, so a new
+				//      unsigned `thinking_blocks` text chunk after text means LiteLLM
+				//      restarted the upstream Vertex stream on the same SSE response)
+				// — reset the open partial text/thinking accumulator instead of
+				// concatenating the fresh attempt onto the truncated first attempt.
 				const incomingChunkId =
 					typeof chunk.id === "string" && chunk.id.length > 0 && chunk.id !== "0" ? chunk.id : undefined;
+				const choice0 = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
+				const delta0 = choice0?.delta as Record<string, unknown> | undefined;
+				const hasProducedAnswerOrSealedThought =
+					output.content.some(block => block.type === "text" && block.text.length > 0) ||
+					Boolean(liteLLMThinkingBlock?.thinkingSignature);
+				const isRoleRestart = delta0?.role === "assistant" && hasProducedAnswerOrSealedThought;
+				const incomingThinkingBlocks = choice0?.delta ? getLiteLLMThinkingBlocksDelta(choice0.delta) : undefined;
+				const isLiteLLMThoughtAfterTextRestart =
+					Boolean(liteLLMThinkingBlock?.thinkingSignature) &&
+					currentBlock?.type === "text" &&
+					currentBlock.text.length > 0 &&
+					Boolean(
+						incomingThinkingBlocks?.some(
+							entry =>
+								typeof entry === "object" &&
+								entry !== null &&
+								Reflect.get(entry, "type") === "thinking" &&
+								typeof Reflect.get(entry, "thinking") === "string" &&
+								(Reflect.get(entry, "thinking") as string).length > 0 &&
+								!Reflect.get(entry, "signature"),
+						),
+					);
+				const isChunkIdRestart = Boolean(incomingChunkId && activeChunkId && incomingChunkId !== activeChunkId);
 				if (
-					incomingChunkId &&
-					activeChunkId &&
-					incomingChunkId !== activeChunkId &&
+					(isChunkIdRestart || isRoleRestart || isLiteLLMThoughtAfterTextRestart) &&
 					streamFinishedAt === undefined &&
 					output.content.length > 0 &&
 					!output.content.some(block => block.type === "toolCall")

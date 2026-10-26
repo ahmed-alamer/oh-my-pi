@@ -236,6 +236,138 @@ describe("terminal frame without connection close", () => {
 		expect(result.content).toEqual([{ type: "text", text: "Clean restarted answer." }]);
 	}, 10_000);
 
+	it("openai-completions: resets open partial text when LiteLLM restarts the stream with the same chunk.id and a new thinking_blocks or role:assistant frame", async () => {
+		const fetchMock = createNeverClosingFetch([
+			{
+				id: "chatcmpl-litellm-fixed-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [
+					{
+						index: 0,
+						delta: {
+							role: "assistant",
+							thinking_blocks: [{ type: "thinking", thinking: "Thinking attempt 1" }],
+						},
+					},
+				],
+			},
+			{
+				id: "chatcmpl-litellm-fixed-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [
+					{
+						index: 0,
+						delta: {
+							thinking_blocks: [{ type: "thinking", thinking: "", signature: "sig-1" }],
+							content: "Truncated first answer...",
+						},
+					},
+				],
+			},
+			{
+				id: "chatcmpl-litellm-fixed-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [
+					{
+						index: 0,
+						delta: {
+							thinking_blocks: [{ type: "thinking", thinking: "Thinking attempt 2" }],
+						},
+					},
+				],
+			},
+			{
+				id: "chatcmpl-litellm-fixed-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [
+					{
+						index: 0,
+						delta: {
+							thinking_blocks: [{ type: "thinking", thinking: "", signature: "sig-2" }],
+							content: "Clean second answer.",
+						},
+					},
+				],
+			},
+			{
+				id: "chatcmpl-litellm-fixed-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+			},
+			{
+				id: "chatcmpl-litellm-fixed-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [],
+				usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+			},
+		]);
+
+		const result = await streamOpenAICompletions(completionsModel, baseContext(), {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(result.content).toEqual([
+			{ type: "thinking", thinking: "Thinking attempt 2", thinkingSignature: "sig-2", summary: false },
+			{ type: "text", text: "Clean second answer." },
+		]);
+	}, 10_000);
+
+	it("openai-completions: resets open partial text when a proxy restarts with delta.role=assistant and identical chunk.id", async () => {
+		const fetchMock = createNeverClosingFetch([
+			{
+				id: "chatcmpl-same-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [{ index: 0, delta: { role: "assistant", content: "First partial attempt..." } }],
+			},
+			{
+				id: "chatcmpl-same-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [{ index: 0, delta: { role: "assistant", content: "Second clean attempt." } }],
+			},
+			{
+				id: "chatcmpl-same-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+			},
+			{
+				id: "chatcmpl-same-id",
+				object: "chat.completion.chunk",
+				created: 0,
+				model: completionsModel.id,
+				choices: [],
+				usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+			},
+		]);
+
+		const result = await streamOpenAICompletions(completionsModel, baseContext(), {
+			apiKey: "test-key",
+			fetch: fetchMock,
+		}).result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(result.content).toEqual([{ type: "text", text: "Second clean attempt." }]);
+	}, 10_000);
+
 	it("openai-responses: breaks immediately on response.completed", async () => {
 		const fetchMock = createNeverClosingFetch([
 			{ type: "response.created", response: { id: "resp_terminal" } },
