@@ -160,7 +160,8 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 		}
 		case "litellm": {
 			const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
-			// rich-v13 invalidates stale reference omitReasoningEffort & un-clamped max_output_tokens.
+			// rich-v13 moves `mode: decisions` groups off chat onto the Decisions runner
+			// and invalidates stale reference omitReasoningEffort & un-clamped max_output_tokens.
 			// rich-v12 invalidates namespaced ids that missed bare catalog references.
 			// rich-v11 excluded ClinePass gateway metadata (issue #10932). rich-v10
 			// filtered known non-conversational LiteLLM modes, unioned compat across
@@ -218,7 +219,9 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 			// v2: rows cached before Fusion pairings carried their lead uid as
 			// `requestModelId` send the composite uid and fail with
 			// `permission_denied: no API providers are available`.
-			return "devin:models-v2";
+			// v3: rows cached before discovery read `ModelInfo.maxTokens` hold a
+			// 200K window on every model.
+			return "devin:models-v3";
 		default:
 			return providerId;
 	}
