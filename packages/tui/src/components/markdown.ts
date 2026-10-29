@@ -4454,6 +4454,11 @@ export class Markdown implements Component {
 				for (const row of this.#renderTable(token as TableToken, contentWidth, tokens[i + 1]?.type, styleContext)) {
 					lines.push({ text: row, nested: false });
 				}
+			} else if (token.type === "blockquote") {
+				const quoteLines = this.#renderToken(token, contentWidth, undefined, styleContext);
+				for (const quoteLine of quoteLines) {
+					lines.push({ ...quoteLine, nested: false });
+				}
 			} else if (isMathToken(token)) {
 				// Display math block inside a list item: stack fractions / matrix rows.
 				const apply = styleContext?.applyText ?? ((t: string) => this.#applyDefaultStyle(t));
