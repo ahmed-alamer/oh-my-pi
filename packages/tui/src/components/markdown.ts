@@ -3860,7 +3860,6 @@ export class Markdown implements Component {
 		switch (token.type) {
 			case "heading": {
 				const headingLevel = token.depth;
-				const headingPrefix = `${"#".repeat(headingLevel)} `;
 				const headingText = this.#renderInlineTokens(token.tokens || [], this.#proseFgExemptContext(styleContext));
 				const headingPlainText = plainInlineTokens(token.tokens || []);
 				let styledHeading: string;
@@ -3878,10 +3877,8 @@ export class Markdown implements Component {
 				}
 				if (headingLevel === 1) {
 					styledHeading = this.#theme.heading(this.#theme.bold(this.#theme.underline(headingText)));
-				} else if (headingLevel === 2) {
-					styledHeading = this.#theme.heading(this.#theme.bold(headingText));
 				} else {
-					styledHeading = this.#theme.heading(this.#theme.bold(headingPrefix + headingText));
+					styledHeading = this.#theme.heading(this.#theme.bold(headingText));
 				}
 				lines.push(renderedLine(styledHeading));
 				if (nextTokenType && nextTokenType !== "space") {
@@ -4454,10 +4451,10 @@ export class Markdown implements Component {
 				for (const row of this.#renderTable(token as TableToken, contentWidth, tokens[i + 1]?.type, styleContext)) {
 					lines.push({ text: row, nested: false });
 				}
-			} else if (token.type === "blockquote") {
-				const quoteLines = this.#renderToken(token, contentWidth, undefined, styleContext);
-				for (const quoteLine of quoteLines) {
-					lines.push({ ...quoteLine, nested: false });
+			} else if (token.type === "blockquote" || token.type === "heading") {
+				const blockLines = this.#renderToken(token, contentWidth, undefined, styleContext);
+				for (const blockLine of blockLines) {
+					lines.push({ ...blockLine, nested: false });
 				}
 			} else if (isMathToken(token)) {
 				// Display math block inside a list item: stack fractions / matrix rows.
