@@ -110,9 +110,8 @@ export function getContextUsageThemeColor(level: ContextUsageLevel): ThemeColor 
 		case "error":
 			return "error";
 		case "purple":
-			return "thinkingHigh";
 		case "warning":
-			return "warning";
+			return "statusLineContext";
 		case "normal":
 			return "statusLineContext";
 	}
